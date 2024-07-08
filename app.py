@@ -1,16 +1,15 @@
 import streamlit as st
 import numpy as np
 import moviepy.editor as mp
+import zipfile
+from io import BytesIO
 import tempfile
-import os
 
-import logging
-
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-
-clip = mp.VideoFileClip(temp_video_path, logger=logger)
-clip.audio.write_audiofile(temp_audio_path, codec='pcm_s16le')
+try:
+    import cv2
+except ImportError as e:
+    st.error(f"Error importing cv2: {e}")
+    st.stop()
 
 # 動画ファイルをアップロードする関数
 def upload_videos(uploaded_files):
@@ -187,4 +186,3 @@ if st.button("リセット"):
         st.session_state.uploaded_videos = []
     if 'converted_videos' in st.session_state:
         st.session_state.converted_videos = []
-
