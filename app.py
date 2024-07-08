@@ -1,32 +1,39 @@
 import streamlit as st
 import moviepy.editor as mp
 import tempfile
+import os
 
 # 動画から音声を抽出する関数
 def extract_audio(video_file):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+    temp_video_fd, temp_video_path = tempfile.mkstemp(suffix=".mp4")
+    with open(temp_video_path, 'wb') as temp_video:
         temp_video.write(video_file.read())
-        temp_video_path = temp_video.name
     
     clip = mp.VideoFileClip(temp_video_path)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-        audio_path = temp_audio.name
+    temp_audio_fd, audio_path = tempfile.mkstemp(suffix=".wav")
     clip.audio.write_audiofile(audio_path, codec='pcm_s16le')
+    
+    os.close(temp_video_fd)
+    os.remove(temp_video_path)
+    
     return audio_path
 
 # 音声を挿入する関数
 def insert_audio(video_file, audio_file):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+    temp_video_fd, temp_video_path = tempfile.mkstemp(suffix=".mp4")
+    with open(temp_video_path, 'wb') as temp_video:
         temp_video.write(video_file.read())
-        temp_video_path = temp_video.name
     
     video_clip = mp.VideoFileClip(temp_video_path)
     audio_clip = mp.AudioFileClip(audio_file)
 
     final_clip = video_clip.set_audio(audio_clip)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_output:
-        temp_output_path = temp_output.name
+    temp_output_fd, temp_output_path = tempfile.mkstemp(suffix=".mp4")
     final_clip.write_videofile(temp_output_path, codec='libx264', audio_codec='aac')
+    
+    os.close(temp_video_fd)
+    os.remove(temp_video_path)
+    
     return temp_output_path
 
 # Streamlitインターフェース
@@ -48,6 +55,12 @@ if uploaded_file:
         
         with open(output_file, "rb") as file:
             st.download_button(label="変換された動画をダウンロード", data=file, file_name="output.mp4", mime="video/mp4")
+        
+        # Clean up temporary audio file
+        os.remove(audio_file)
+        os.close(temp_output_fd)
+        os.remove(output_file)
+
     except Exception as e:
         st.error(f"エラーが発生しました: {str(e)}")
         st.error("詳細なエラーメッセージはログに記録されています。")
