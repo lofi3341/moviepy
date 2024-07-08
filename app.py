@@ -1,24 +1,31 @@
 import streamlit as st
 import moviepy.editor as mp
-from io import BytesIO
 import tempfile
 
 # 動画から音声を抽出する関数
 def extract_audio(video_file):
-    clip = mp.VideoFileClip(video_file)
-    temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-    audio_path = temp_audio.name
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+        temp_video.write(video_file.read())
+        temp_video_path = temp_video.name
+    
+    clip = mp.VideoFileClip(temp_video_path)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+        audio_path = temp_audio.name
     clip.audio.write_audiofile(audio_path, codec='pcm_s16le')
     return audio_path
 
 # 音声を挿入する関数
 def insert_audio(video_file, audio_file):
-    video_clip = mp.VideoFileClip(video_file)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+        temp_video.write(video_file.read())
+        temp_video_path = temp_video.name
+    
+    video_clip = mp.VideoFileClip(temp_video_path)
     audio_clip = mp.AudioFileClip(audio_file)
 
     final_clip = video_clip.set_audio(audio_clip)
-    temp_output = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-    temp_output_path = temp_output.name
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_output:
+        temp_output_path = temp_output.name
     final_clip.write_videofile(temp_output_path, codec='libx264', audio_codec='aac')
     return temp_output_path
 
@@ -32,6 +39,9 @@ if uploaded_file:
     try:
         audio_file = extract_audio(uploaded_file)
         st.write("音声が抽出されました")
+
+        # Reset file pointer to the beginning after reading
+        uploaded_file.seek(0)
 
         output_file = insert_audio(uploaded_file, audio_file)
         st.write("音声が挿入されました")
