@@ -3,4 +3,3 @@ moviepy
 numpy
 opencv-python-headless
 tempfile
-zipfile
