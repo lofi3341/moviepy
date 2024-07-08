@@ -1,5 +1,4 @@
 streamlit
-numpy
 moviepy
-opencv-python
-Pillow
+numpy
+opencv-python-headless
