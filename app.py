@@ -1,9 +1,9 @@
 import streamlit as st
-import os
 import numpy as np
 import moviepy.editor as mp
 import zipfile
-import subprocess
+from io import BytesIO
+import tempfile
 
 try:
     import cv2
@@ -11,43 +11,29 @@ except ImportError as e:
     st.error(f"Error importing cv2: {e}")
     st.stop()
 
-if not os.path.exists('ffmpeg'):
-    st.info("Downloading ffmpeg...")
-    subprocess.run(["bash", "./download_ffmpeg.sh"])
-    st.success("ffmpeg successfully downloaded.")
-
-# ディレクトリの作成
-if not os.path.exists('uploads'):
-    os.makedirs('uploads')
-if not os.path.exists('output'):
-    os.makedirs('output')
-if not os.path.exists('downloads'):
-    os.makedirs('downloads')
-
-st.write("Directories created")
-
 # 動画ファイルをアップロードする関数
 def upload_videos(uploaded_files):
-    saved_files = []
-    for uploaded_file in uploaded_files:
-        video_path = os.path.join('uploads', uploaded_file.name)
-        with open(video_path, 'wb') as f:
-            f.write(uploaded_file.getbuffer())
-        saved_files.append(video_path)
-    return saved_files
+    return uploaded_files
 
 # 動画を分割し、結合する関数
-def process_and_merge_videos(video_paths):
-    output_paths = []
-    for video_path in video_paths:
-        cap = cv2.VideoCapture(video_path)
+def process_and_merge_videos(uploaded_files):
+    output_files = []
+    for uploaded_file in uploaded_files:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
+            temp_file.write(uploaded_file.getbuffer())
+            temp_file_path = temp_file.name
+        
+        cap = cv2.VideoCapture(temp_file_path)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = int(cap.get(cv2.CAP_PROP_FPS))
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 
-        output_path = os.path.join('output', 'merged_' + os.path.basename(video_path))
-        out = cv2.VideoWriter(output_path, fourcc, fps, (5760, 1080))
+        output_file = BytesIO()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_output_file:
+            output_file_path = temp_output_file.name
+        
+        out = cv2.VideoWriter(output_file_path, fourcc, fps, (5760, 1080))
 
         while cap.isOpened():
             ret, frame = cap.read()
@@ -63,50 +49,84 @@ def process_and_merge_videos(video_paths):
 
         cap.release()
         out.release()
-        output_paths.append(output_path)
-    return output_paths
+
+        with open(output_file_path, 'rb') as f:
+            output_file.write(f.read())
+        output_file.seek(0)
+        output_files.append(output_file)
+    return output_files
 
 # 動画から音声を抽出する関数
-def extract_audio(video_path):
-    clip = mp.VideoFileClip(video_path)
-    audio_path = os.path.join('output', 'audio_' + os.path.basename(video_path).replace('.mp4', '.wav'))
-    clip.audio.write_audiofile(audio_path, codec='pcm_s16le')
-    return audio_path
+def extract_audio(uploaded_file):
+    audio_file = BytesIO()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video_file:
+        temp_video_file.write(uploaded_file.getbuffer())
+        temp_video_path = temp_video_file.name
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio_file:
+        temp_audio_path = temp_audio_file.name
+    
+    clip = mp.VideoFileClip(temp_video_path)
+    clip.audio.write_audiofile(temp_audio_path, codec='pcm_s16le')
+
+    with open(temp_audio_path, 'rb') as f:
+        audio_file.write(f.read())
+    audio_file.seek(0)
+    return audio_file
 
 # 音声を挿入する関数
-def insert_audio(video_path, audio_path):
-    video_clip = mp.VideoFileClip(video_path)
-    audio_clip = mp.AudioFileClip(audio_path)
+def insert_audio(uploaded_file, audio_file):
+    output_file = BytesIO()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video_file:
+        temp_video_file.write(uploaded_file.getbuffer())
+        temp_video_path = temp_video_file.name
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio_file:
+        temp_audio_file.write(audio_file.getbuffer())
+        temp_audio_path = temp_audio_file.name
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_output_file:
+        temp_output_path = temp_output_file.name
+    
+    video_clip = mp.VideoFileClip(temp_video_path)
+    audio_clip = mp.AudioFileClip(temp_audio_path)
 
     final_clip = video_clip.set_audio(audio_clip)
-    output_path = os.path.join('output', 'final_' + os.path.basename(video_path))
-    final_clip.write_videofile(output_path, codec='libx264', audio_codec='aac')
-    return output_path
+    final_clip.write_videofile(temp_output_path, codec='libx264', audio_codec='aac')
 
-# 動画と音声を削除する関数
-def delete_files():
-    for file in os.listdir('uploads'):
-        os.remove(os.path.join('uploads', file))
-    for file in os.listdir('output'):
-        os.remove(os.path.join('output', file))
-    for file in os.listdir('downloads'):
-        os.remove(os.path.join('downloads', file))
+    with open(temp_output_path, 'rb') as f:
+        output_file.write(f.read())
+    output_file.seek(0)
+    return output_file
 
 # 動画を指定したサイズに変換する関数
-def resize_video(video_path, width, height):
-    clip = mp.VideoFileClip(video_path)
+def resize_video(uploaded_file, width, height):
+    output_file = BytesIO()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video_file:
+        temp_video_file.write(uploaded_file.getbuffer())
+        temp_video_path = temp_video_file.name
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_output_file:
+        temp_output_path = temp_output_file.name
+    
+    clip = mp.VideoFileClip(temp_video_path)
     resized_clip = clip.resize((width, height))
-    output_path = os.path.join('output', f'resized_{os.path.basename(video_path)}')
-    resized_clip.write_videofile(output_path, codec='libx264', audio_codec='aac')
-    return output_path
+    resized_clip.write_videofile(temp_output_path, codec='libx264', audio_codec='aac')
+
+    with open(temp_output_path, 'rb') as f:
+        output_file.write(f.read())
+    output_file.seek(0)
+    return output_file
 
 # 全ての出力動画をzipアーカイブにまとめる関数
-def create_zip(video_paths, zip_name):
-    zip_path = os.path.join('downloads', zip_name)
-    with zipfile.ZipFile(zip_path, 'w') as zipf:
-        for video_path in video_paths:
-            zipf.write(video_path, os.path.basename(video_path))
-    return zip_path
+def create_zip(video_files, zip_name):
+    zip_file = BytesIO()
+    with zipfile.ZipFile(zip_file, 'w') as zipf:
+        for i, video_file in enumerate(video_files):
+            video_file.seek(0)
+            zipf.writestr(f"video_{i}.mp4", video_file.read())
+    zip_file.seek(0)
+    return zip_file
 
 # Streamlitインターフェース
 st.title("動画分割・結合・音声挿入アプリ")
@@ -120,49 +140,49 @@ if uploaded_files:
 if st.button("変換"):
     st.write("Processing videos")
     if 'uploaded_videos' in st.session_state:
-        output_paths = process_and_merge_videos(st.session_state.uploaded_videos)
+        output_files = process_and_merge_videos(st.session_state.uploaded_videos)
 
-        extracted_audio_paths = []
-        for video_path in st.session_state.uploaded_videos:
-            audio_path = extract_audio(video_path)
-            extracted_audio_paths.append(audio_path)
+        extracted_audio_files = []
+        for uploaded_file in st.session_state.uploaded_videos:
+            audio_file = extract_audio(uploaded_file)
+            extracted_audio_files.append(audio_file)
 
-        output_with_audio_paths = []
-        for video_path, audio_path in zip(output_paths, extracted_audio_paths):
-            output_path = insert_audio(video_path, audio_path)
-            output_with_audio_paths.append(output_path)
+        output_with_audio_files = []
+        for uploaded_file, audio_file in zip(output_files, extracted_audio_files):
+            output_file = insert_audio(uploaded_file, audio_file)
+            output_with_audio_files.append(output_file)
 
-        st.session_state.converted_videos = output_with_audio_paths
+        st.session_state.converted_videos = output_with_audio_files
         st.write("Videos processed successfully")
 
 if 'converted_videos' in st.session_state:
     st.subheader("変換された動画")
-    for video in st.session_state.converted_videos:
-        video_name = os.path.basename(video)
-        with open(video, "rb") as file:
-            st.download_button(label=f"{video_name}をダウンロード", data=file, file_name=video_name, mime="video/mp4")
+    for i, video in enumerate(st.session_state.converted_videos):
+        video.seek(0)
+        st.download_button(label=f"動画 {i+1} をダウンロード", data=video, file_name=f"converted_video_{i+1}.mp4", mime="video/mp4")
 
     if st.button("動画を2880x540に変換しまとめてzipでダウンロード"):
         st.write("Resizing videos to 2880x540")
         resized_videos = []
-        for video_path in st.session_state.converted_videos:
-            resized_video_path = resize_video(video_path, 2880, 540)
-            resized_videos.append(resized_video_path)
-        zip_path = create_zip(resized_videos, "resized_videos_2880x540.zip")
-        with open(zip_path, "rb") as file:
-            st.download_button(label="全動画を2880x540に変換しzipでダウンロード", data=file, file_name="resized_videos_2880x540.zip", mime="application/zip")
+        for video in st.session_state.converted_videos:
+            resized_video = resize_video(video, 2880, 540)
+            resized_videos.append(resized_video)
+        zip_file = create_zip(resized_videos, "resized_videos_2880x540.zip")
+        zip_file.seek(0)
+        st.download_button(label="全動画を2880x540に変換しzipでダウンロード", data=zip_file, file_name="resized_videos_2880x540.zip", mime="application/zip")
 
     if st.button("動画を1920x360に変換しまとめてzipでダウンロード"):
         st.write("Resizing videos to 1920x360")
         resized_videos = []
-        for video_path in st.session_state.converted_videos:
-            resized_video_path = resize_video(video_path, 1920, 360)
-            resized_videos.append(resized_video_path)
-        zip_path = create_zip(resized_videos, "resized_videos_1920x360.zip")
-        with open(zip_path, "rb") as file:
-            st.download_button(label="全動画を1920x360に変換しzipでダウンロード", data=file, file_name="resized_videos_1920x360.zip", mime="application/zip")
+        for video in st.session_state.converted_videos:
+            resized_video = resize_video(video, 1920, 360)
+            resized_videos.append(resized_video)
+        zip_file = create_zip(resized_videos, "resized_videos_1920x360.zip")
+        zip_file.seek(0)
+        st.download_button(label="全動画を1920x360に変換しzipでダウンロード", data=zip_file, file_name="resized_videos_1920x360.zip", mime="application/zip")
 
 if st.button("リセット"):
-    delete_files()
     if 'uploaded_videos' in st.session_state:
         st.session_state.uploaded_videos = []
+    if 'converted_videos' in st.session_state:
+        st.session_state.converted_videos = []
